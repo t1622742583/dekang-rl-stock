@@ -1,16 +1,15 @@
+# 训练策略
 import argparse
-from collections import defaultdict
 from typing import List
-
-import gym
-import numpy as np
 import pandas as pd
 import tushare as ts
-from gym import spaces
+import gym
 from loguru import logger
 from stable_baselines import PPO2
 from stable_baselines.common.policies import MlpPolicy
 from stable_baselines.common.vec_env import DummyVecEnv
+
+from feature_deals import *
 
 # 初始化pro接口
 pro = ts.pro_api('854634d420c0b6aea2907030279da881519909692cf56e6f35c4718c')
@@ -68,16 +67,14 @@ def get_trade_days(start_date, end_date):
     return trade_days
 
 
-# 获取最大整数
-MAX_INT = np.iinfo(np.int32).max
-MAX_ACCOUNT_BALANCE = MAX_INT  # 最大账户余额
-MAX_NUM_SHARES = 2147483647  # 最大持仓数量
-MAX_SHARE_PRICE = 5000  # 最大股价
-MAX_VOLUME = 1000e8  # 最大成交量
-MAX_AMOUNT = 3e10  # 最大成交额
-MAX_OPEN_POSITIONS = 5  # 最大持仓数量
-MAX_STEPS = 20000  # 最大步数
-MAX_DAY_CHANGE = 1  # 最大日涨幅
+def get_results_df(cache_dates, cache_portfolio_mv):
+    """ 用于回测结果的可视化"""
+    df = pd.DataFrame({'date': cache_dates, 'portfolio': cache_portfolio_mv})  # 日期和总市值
+    df['rate'] = df['portfolio'].pct_change()  # 计算收益率
+    df['equity'] = (df['rate'] + 1).cumprod()  # 计算累计收益率
+    df.set_index('date', inplace=True)  # 以日期为索引
+    df.dropna(inplace=True)  # 删除空值
+    return df
 
 
 class Account:
@@ -94,14 +91,13 @@ class Account:
         self.shares_held = 0  # 持有股票数量
         self.commission = commission  # 手续费
         self.stamp_duty = stamp_duty  # 印花税
-        # self.curr_holding = defaultdict(float)  # 当前持仓{symbol:市值}
-        #
-        # self.cache_dates = []  # 日期序列
         self.cache_portfolio_mv = []  # 每日市值序列
+
     @property
     def profit(self):
         """收益"""
         return self.now_net_worth - self.init_cash
+
     def buy(self, now_price: float, buy_ratio: float = 1.0):
         """买入"""
         # 可以购买的股票数量
@@ -150,11 +146,12 @@ class Account:
 
 class TradingEnv(gym.Env):
     """交易环境"""
+    # TODO: 使用pytorch实现PPO等算法
     metadata = {'render.modes': ['human']}  # 人类可读的模式
 
     def __init__(self,
                  market_df: pd.DataFrame,  # 行情数据
-                 features: List[str],  # 特征列表
+                 features: List[dict],  # 特征列表
                  initial_balance: float = 10000,  # 初始账户余额
                  commission: float = 0.0003,
                  stamp_duty: float = 0.001,  # 印花税 千1
@@ -166,40 +163,29 @@ class TradingEnv(gym.Env):
         self.commission = commission  # 手续费
         self.stamp_duty = stamp_duty  # 印花税
         self.reward_range = (0, MAX_ACCOUNT_BALANCE)  # 奖励范围
-
+        self.features = features  # 特征列表
         # 定义动作空间
         # 0: 买入 1: 卖出 2: 无操作
 
-        self.action_space = spaces.Box(
+        self.action_space = gym.spaces.Box(
             low=np.array([0, 0]), high=np.array([3, 1]), dtype=np.float16)
 
         # 定义观察空间 shape=(19,)意思是一维数组，长度为19
-        self.observation_space = spaces.Box(
-            low=0, high=1, shape=(len(features) + 4,), dtype=np.float16)
+        self.observation_space = gym.spaces.Box(
+            low=0, high=1, shape=(len(features),), dtype=np.float16)
 
     def _next_observation(self):
         """获取下一个观察值"""
+        # TODO: 如果'tradestatus'为1，表示停牌，需要跳过
         # TODO:动态特征值
-        # 困难1:对数据进行标准化 可以写好标准化方案（封装成类），字典传入 如：[{"name":"open","deal":DealOpen}]
-        obs = np.array([
-            self.market_df.loc[self.current_step, 'open'] / MAX_SHARE_PRICE,  # 开盘价
-            self.market_df.loc[self.current_step, 'high'] / MAX_SHARE_PRICE,  # 最高价
-            self.market_df.loc[self.current_step, 'low'] / MAX_SHARE_PRICE,  # 最低价
-            self.market_df.loc[self.current_step, 'close'] / MAX_SHARE_PRICE,  # 收盘价
-            self.market_df.loc[self.current_step, 'volume'] / MAX_VOLUME,  # 成交量
-            self.market_df.loc[self.current_step, 'amount'] / MAX_AMOUNT,  # 成交额
-            self.market_df.loc[self.current_step, 'adjustflag'] / 10,  # 复权状态
-            self.market_df.loc[self.current_step, 'tradestatus'] / 1,  # 交易状态
-            self.market_df.loc[self.current_step, 'pctChg'] / 100,  # 涨跌幅
-            self.market_df.loc[self.current_step, 'peTTM'] / 1e4,  # 市盈率TTM
-            self.market_df.loc[self.current_step, 'pbMRQ'] / 100,  # 市净率MRQ
-            self.market_df.loc[self.current_step, 'psTTM'] / 100,  # 市销率TTM
-            self.market_df.loc[self.current_step, 'pctChg'] / 1e3,  # 涨跌幅
-            self.account.curr_cash / MAX_ACCOUNT_BALANCE,  # 账户余额
-            self.account.max_net_worth / MAX_ACCOUNT_BALANCE,  # 最大账户价值
-            self.account.shares_held / MAX_NUM_SHARES,  # 持有股票数量
-            self.account.cost_basis / MAX_SHARE_PRICE,  # 成本基数
-        ])
+        feature_values = []  # 特征值
+        for feature in self.features:
+            # TODO:多值多from组合
+            if feature["from"] == "market":
+                feature_values.append(feature["deal"].deal(self.market_df.loc[self.current_step, feature["name"]]))
+            elif feature["from"] == "account":
+                feature_values.append(feature["deal"].deal(getattr(self.account, feature["name"])))
+        obs = np.array(feature_values)
         return obs
 
     def _take_action(self, action):
@@ -207,15 +193,15 @@ class TradingEnv(gym.Env):
         current_price = self.market_df.loc[self.current_step, "close"]  # 当前价格
 
         action_type = action[0]  # 动作类型
-        amount = action[1]  # 动作数量
+        ratio = action[1]  # 购买比例
 
-        if action_type < 1: # 0-1之间
+        if action_type < 1:  # 0-1之间
             # 购买 amount % 的可用余额的股票
-            self.account.buy(current_price)
-        elif action_type < 2: # 1-2之间
+            self.account.buy(current_price, ratio)
+        elif action_type < 2:  # 1-2之间
             # 卖出 amount % 的持有股票
-            self.account.sell(current_price)
-        elif action_type < 3: # 2-3之间
+            self.account.sell(current_price, ratio)
+        elif action_type < 3:  # 2-3之间
             # 无操作
             self.account.keep(current_price)
 
@@ -246,11 +232,43 @@ class TradingEnv(gym.Env):
         return self._next_observation()
 
     def render(self, mode='human', close=False):
-        """结束"""
-        return self.account.profit
+        """每日结束"""
+        return self.account.now_net_worth
 
 
-def main(opt):
+# 股价
+class Analyzer:
+    # TODO: 画基准线
+    def __init__(self, df_results: pd.DataFrame, benchmarks: List[str] = ['000300.SH']):
+        self.df_results = df_results
+        self.benchmarks = benchmarks
+
+    def show_results(self):
+        returns = self.df_results['rate']
+        import empyrical
+        print('累计收益：', round(empyrical.cum_returns_final(returns), 3))
+        print('年化收益：', round(empyrical.annual_return(returns), 3))
+        print('最大回撤：', round(empyrical.max_drawdown(returns), 3))
+        print('夏普比', round(empyrical.sharpe_ratio(returns), 3))
+        print('卡玛比', round(empyrical.calmar_ratio(returns), 3))
+        print('omega', round(empyrical.omega_ratio(returns)), 3)
+
+    def plot(self):
+        returns = []
+
+        se_port = self.df_results['rate']
+        se_port.name = '策略'
+        returns.append(se_port)
+        all_returns = pd.concat(returns, axis=1)
+        all_returns.dropna(inplace=True)
+        all_equity = (1 + all_returns).cumprod()
+
+        import matplotlib.pyplot as plt
+        all_equity.plot()
+        plt.show()
+
+
+def main1(opt):
     # 从.h5中查询出当前股票该时期的行情数据
     market_df = get_stock_market_from_h5(opt.code, opt.start_date, opt.end_date)
     # 解决数据不全的问题
@@ -266,26 +284,56 @@ def main(opt):
     # 按中间时间段划分训练集和测试集
     train_market_df = market_df[:int(len(market_df) * 0.8)]
     test_market_df = market_df[int(len(market_df) * 0.8):]
+    # 特征
+
+    features = [
+        # 基本行情
+        {"name": "open", "from": "market", "type": "float", "deal": DealOpen},
+        {"name": "high", "from": "market", "type": "float", "deal": DealHigh},
+        {"name": "low", "from": "market", "type": "float", "deal": DealLow},
+        {"name": "close", "from": "market", "type": "float", "deal": DealClose},
+        {"name": "volume", "from": "market", "type": "float", "deal": DealVolume},
+        {"name": "amount", "from": "market", "type": "float", "deal": DealAmount},
+        {"name": "pctChg", "from": "market", "type": "float", "deal": DealPctChg},
+        {"name": "peTTM", "from": "market", "type": "float", "deal": DealPeTTM},
+        {"name": "pbMRQ", "from": "market", "type": "float", "deal": DealPbMRQ},
+        {"name": "psTTM", "from": "market", "type": "float", "deal": DealPsTTM},
+        #   账户类
+        {"name": "now_net_worth", "from": "account", "type": "float", "deal": DealAccountNowNetWorth},
+        {"name": "curr_cash", "from": "account", "type": "float", "deal": DealAccountCash},
+        {"name": "max_net_worth", "from": "account", "type": "float", "deal": DealAccountMaxNetWorth},
+        {"name": "shares_held", "from": "account", "type": "float", "deal": DealAccountSharesHeld},
+        {"name": "cost_basis", "from": "account", "type": "float", "deal": DealAccountCostBasis},
+    ]
+
     # 创建环境
-    env = DummyVecEnv([lambda: TradingEnv(train_market_df)])  # 创建环境
+    env = DummyVecEnv([lambda: TradingEnv(train_market_df, features)])  # 创建环境
     # 创建模型
     model = PPO2(MlpPolicy, env, verbose=0, tensorboard_log='./log')
     model.learn(total_timesteps=int(1e4))
     # 测试环境
-    env = DummyVecEnv([lambda: TradingEnv(test_market_df)])
+    env = DummyVecEnv([lambda: TradingEnv(test_market_df, features)])
     obs = env.reset()
+    cache_portfolio_mv = []  # 缓存组合市值
     for i in range(len(test_market_df) - 1):
         action, _states = model.predict(obs)
         obs, rewards, done, info = env.step(action)
-        profit = env.render()
-        # day_profits.append(profit)
+        mv = env.render()  # 每日净值
+        cache_portfolio_mv.append(mv)
         if done:
             break
+    df_results = get_results_df(test_market_df.index, cache_portfolio_mv)
+    analyzer = Analyzer(df_results, opt.benckmarks)
+    analyzer.plot()
+    analyzer.show_results()
+    # 询问是否保存模型
+    if input('是否保存模型？(y/n)').lower() == 'y':
+        model.save('./model/{}.pkl'.format(opt.code))
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--code', type=str, default='SH.000001', help='股票代码')
+    parser.add_argument('--code', type=str, default='000001.SH', help='股票代码')
     parser.add_argument('--start_date', type=str, default='', help='开始时间')
     parser.add_argument('--mid_date', type=str, default='', help='中间时间')
     parser.add_argument('--end_date', type=str, default='', help='结束时间')
@@ -293,4 +341,4 @@ if __name__ == '__main__':
     parser.add_argument('--benckmarks', type=List, default=['000300.SH'], help='对比'
                                                                                '基准')
     opt = parser.parse_args()
-    main(opt)
+    main1(opt)

@@ -16,5 +16,6 @@ calender = pro.trade_cal()
 
 # 筛选出交易时间的日期
 trade_dates = calender[calender.is_open == 1]['cal_date'].values.tolist()
+print(trade_dates)
 pass
 # Index(['exchange', 'cal_date', 'is_open', 'pretrade_date'], dtype='object')
