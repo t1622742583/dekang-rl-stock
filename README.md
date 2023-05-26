@@ -15,8 +15,7 @@
 而目前系统性的强化学习整套交易框架很少，如qlib,baostock非常零散，实现分布式行情数据，RL,回测，实盘，积木式策略，多因子组合正是我要做的，以下是现阶段的架构图,也希望业界人士可以参与到这次“大修”上来，
 
 # 架构图
-
-![whiteboard_exported_image.png](..%2F..%2F..%2FDownloads%2Fwhiteboard_exported_image.png)
+![architecture-diagram.png](imgs%2Farchitecture-diagram.png)
 # 当前实现
 
 # 未来远景（当前实现有巨大困难和挑战）
@@ -34,7 +33,7 @@
 - 我是一个渴望自由，喜欢挑战的人，不喜欢公司的管束，希望出去旅行，但自由是建立在良好的财务上，你背后还有家庭，我们叫“财务自由”，希望可以帮助类似我这样的朋友吧
 # 强化学习相关知识
 ## 空间类型
-- box: 一维数组
+- box: 数组
 - Discrete: 离散
 - MultiDiscrete: 多维离散
 - MultiBinary: 多维二进制
