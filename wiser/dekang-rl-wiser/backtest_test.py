@@ -5,66 +5,11 @@ import pandas as pd
 import tushare as ts
 import gym
 from loguru import logger
-from stable_baselines import PPO2
-from stable_baselines.common.policies import MlpPolicy
-from stable_baselines.common.vec_env import DummyVecEnv
+from stable_baselines3 import PPO
+from stable_baselines3.common.policies import MlpPolicy
+from stable_baselines3.common.vec_env import DummyVecEnv
 
 from feature_deals import *
-
-# 初始化pro接口
-pro = ts.pro_api('854634d420c0b6aea2907030279da881519909692cf56e6f35c4718c')
-STOCKS_DB = 'dbs/stocks.h5'
-BASIC_DB = 'dbs/basic.h5'
-
-
-def get_stock_market_from_h5(code, start_date, end_date):
-    """ 从.h5中查询出当前股票该时期的行情数据"""
-    with pd.HDFStore(STOCKS_DB) as store:
-        df = store[code]
-        df = df[df.index >= start_date]
-        df = df[df.index <= end_date]
-        return df
-
-
-def download_stock_market_from_tushare(code, start_date, end_date):
-    """ 从tushare下载当前股票该时期的行情数据"""
-    df = pro.daily(ts_code=code, start_date=start_date, end_date=end_date)
-    df.rename(columns={'trade_date': 'date', 'ts_code': 'code', 'vol': 'volume'}, inplace=True)
-    df.set_index('date', inplace=True)
-    df.index = pd.to_datetime(df.index)
-    df.sort_index(ascending=True, inplace=True)
-    return df
-
-
-def save_stock_market_to_h5(code, df):
-    """ 保存当前股票该时期的行情数据到.h5"""
-    with pd.HDFStore(STOCKS_DB) as store:
-        # 取出原始数据
-        old_df = store[code]
-        # 合并数据
-        df = pd.concat([old_df, df])
-        # 去重
-        df = df[~df.index.duplicated(keep='first')]
-        # 保存
-        store[code] = df
-
-
-def get_trade_days(start_date, end_date):
-    """ 获取当前股票该时期所有交易日"""
-    with pd.HDFStore(BASIC_DB) as store:
-        # 查询>start_date <end_date的所有交易日
-        trade_days = store['trade_days']
-    if trade_days.empty:
-        # 下载数据
-        trade_days = pro.trade_cal(exchange='')
-        # 保存到.h5
-        with pd.HDFStore(BASIC_DB) as store:
-            store['trade_days'] = trade_days
-    trade_days = trade_days[trade_days.index >= start_date]
-    trade_days = trade_days[trade_days.index <= end_date]
-    trade_days = trade_days.index.tolist()
-
-    return trade_days
 
 
 def get_results_df(cache_dates, cache_portfolio_mv):
