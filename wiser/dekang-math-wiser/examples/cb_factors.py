@@ -1,4 +1,4 @@
-from engine.algo.algos import *
+from ..engine.algo.algos import *
 
 e = Engine()
 
