@@ -9,6 +9,9 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.policies import MlpPolicy
 from stable_baselines3.common.vec_env import DummyVecEnv
 
+from data_helper.downloader import download_stock_market_from_tushare
+from data_helper.geter import get_stock_market_from_h5, get_trade_days
+from data_helper.server import save_stock_market_to_h5
 from feature_deals import *
 
 
@@ -254,7 +257,7 @@ def main1(opt):
     # 创建环境
     env = DummyVecEnv([lambda: TradingEnv(train_market_df, features)])  # 创建环境
     # 创建模型
-    model = PPO2(MlpPolicy, env, verbose=0, tensorboard_log='./log')
+    model = PPO(MlpPolicy, env, verbose=0, tensorboard_log='./log')
     model.learn(total_timesteps=int(1e4))
     # 测试环境
     env = DummyVecEnv([lambda: TradingEnv(test_market_df, features)])

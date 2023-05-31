@@ -1,6 +1,5 @@
 import argparse
 from typing import List
-
 from engine.engine_runner import Engine
 
 
@@ -12,6 +11,7 @@ def main(opt):
     # 排名
     # 要产生哪些因子 如何，自定义 计算逻辑 {"kgh":Kgh} 财务指标的获取，
     # 策略 哪种情况买入 选股 > < 排名
+
     pass
 
 
