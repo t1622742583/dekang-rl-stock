@@ -1,5 +1,6 @@
 from typing import List
 
+from data_helper.geter import get_trade_days
 from feature_deals import BuildProfitToGr
 
 
@@ -15,7 +16,8 @@ class Feature:
         self.build = build
         self.normalization = normalization
 
-    def deal(self, codes, date, now_market):
+    def __call__(self, date, now_market):
+        codes = now_market.index.values
         if self.build:
             value = self.build(self.name, codes, date, now_market)
         else:
@@ -23,23 +25,6 @@ class Feature:
         if self.normalization:
             value = self.normalization(value)
         return value
-
-
-features = [
-    # 基本行情
-    Feature("open"),
-    Feature("close"),
-    Feature("high"),
-    Feature("low"),
-    Feature("volume"),
-    # 外部特征
-    Feature("profit_to_gr", build=BuildProfitToGr()),
-]
-strategy_pipelines = [
-    # 选股
-    # 买入
-    # 卖出
-]
 
 
 class Account:
@@ -57,6 +42,9 @@ class Account:
         self.commission = commission  # 手续费
         self.stamp_duty = stamp_duty  # 印花税
         self.cache_portfolio_mv = []  # 每日市值序列
+        self.position = []  # 持仓
+        # 比例
+        self.position_ratio = []
 
     @property
     def profit(self):
@@ -115,7 +103,7 @@ class TradingEnv():
     def __init__(self,
                  start_date: str,  # 开始日期
                  end_date: str,  # 结束日期
-                 features: List[dict],  # 特征列表
+                 features: List,  # 特征列表
                  initial_balance: float = 10000,  # 初始账户余额
                  commission: float = 0.0003,
                  stamp_duty: float = 0.001,  # 印花税 千1
@@ -130,20 +118,25 @@ class TradingEnv():
         self.stamp_duty = stamp_duty  # 印花税
         self.features = features  # 特征列表
         self.strategy_pipelines = strategy_pipelines  # 策略流水线
-        self.trade_days = self.get_trade_days(self.start_date, self.end_date)
+        self.trade_days = get_trade_days(self.start_date, self.end_date)
+        self.selected_codes = []  # 选中的股票/可转债代码
 
-    def get_trade_days(self, start_date: str, end_date: str) -> List[str]:
-        """获取交易日列表"""
-        return []
+
     def get_current_observation(self):
-        self.current_observation_df = self.market_df.loc[self.current_date, self.features]
+        # 1.获取当前日期所有行情
+        # 2.
+        self.current_observation_df = self.market_df.loc[self.current_date]
+        for feature in self.features:
+            feature_df = feature(self.current_date, self.current_observation_df)
+
     def step(self):
         """执行一步"""
         # 获取当前观察值
         self.get_current_observation()
         # 执行策略流水线
         for strategy_pipeline in self.strategy_pipelines:
-            strategy_pipeline.run(self)
+            strategy_pipeline(self)
+
     def run(self):
         """运行"""
         for trade_date in self.trade_days:
@@ -151,64 +144,31 @@ class TradingEnv():
             self.step()
         # TODO:总结
 
-    #
-    # def _next_observation(self):
-    #     """获取下一个观察值"""
-    #     # TODO: 如果'tradestatus'为1，表示停牌，需要跳过
-    #     # TODO:动态特征值
-    #     feature_values = []  # 特征值
-    #     for feature in self.features:
-    #         # TODO:多值多from组合
-    #         if feature["from"] == "market":
-    #             feature_values.append(feature["deal"].deal(self.market_df.loc[self.current_step, feature["name"]]))
-    #         elif feature["from"] == "account":
-    #             feature_values.append(feature["deal"].deal(getattr(self.account, feature["name"])))
-    #     obs = np.array(feature_values)
-    #     return obs
-    #
-    # def _take_action(self, action):
-    #     """ 执行动作"""
-    #     current_price = self.market_df.loc[self.current_step, "close"]  # 当前价格
-    #
-    #     action_type = action[0]  # 动作类型
-    #     ratio = action[1]  # 购买比例
-    #
-    #     if action_type < 1:  # 0-1之间
-    #         # 购买 amount % 的可用余额的股票
-    #         self.account.buy(current_price, ratio)
-    #     elif action_type < 2:  # 1-2之间
-    #         # 卖出 amount % 的持有股票
-    #         self.account.sell(current_price, ratio)
-    #     elif action_type < 3:  # 2-3之间
-    #         # 无操作
-    #         self.account.keep(current_price)
-    #
-    # def step(self, action):
-    #     """下一步"""
-    #     self._take_action(action)  # 执行动作
-    #     done = False  # 是否结束
-    #     self.current_step += 1  # 当前步数
-    #     if self.current_step > len(self.market_df.loc[:, 'open'].values) - 1:
-    #         self.current_step = 0  # 重置当前步数(可能是重新训练)
-    #         # done = True
-    #     # 奖励
-    #     reward = self.account.now_net_worth - self.initial_balance  # 奖励
-    #     reward = 1 if reward > 0 else -2  # 奖励值
-    #     if self.account.now_net_worth < 0:
-    #         done = True
-    #     obs = self._next_observation()
-    #     return obs, reward, done, {}
-    #
-    # def reset(self, new_df: pd.DataFrame = None):
-    #     """重置"""
-    #     # Reset the state of the environment to an initial state
-    #     # self.balance = self.initial_balance  # 账户余额
-    #     self.account = Account(self.initial_balance, self.commission, self.stamp_duty)
-    #     if new_df:
-    #         self.market_df = new_df
-    #     self.current_step = 0
-    #     return self._next_observation()
-    #
-    # def render(self, mode='human', close=False):
-    #     """每日结束"""
-    #     return self.account.now_net_worth
+
+features = [
+    # 基本行情
+    Feature("open"),
+    Feature("close"),
+    Feature("high"),
+    Feature("low"),
+    Feature("volume"),
+    # 外部特征
+    Feature("profit_to_gr", build=BuildProfitToGr()),
+]
+from strategys.cb import TopFactor
+
+strategy_pipelines = [
+    # 选股
+    TopFactor(
+        factors=[
+            {
+                "name": "profit_to_gr",
+                "big2smail": True,
+            }
+        ]
+    ),
+    # 调仓
+    ConditionedWarehouse(k=10),
+]
+TradingEnv(start_date="2019-01-01", end_date="2020-01-01", features=features,
+           strategy_pipelines=strategy_pipelines).run()
