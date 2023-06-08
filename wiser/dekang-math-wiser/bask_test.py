@@ -155,7 +155,7 @@ features = [
     # 外部特征
     Feature("profit_to_gr", build=BuildProfitToGr()),
 ]
-from strategys.cb import TopFactor
+from strategys.cb import TopFactor, ConditionedWarehouse
 
 strategy_pipelines = [
     # 选股

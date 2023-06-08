@@ -18,15 +18,17 @@ class ConditionedWarehouse:
     """调仓"""
     def __init__(self,k=10):
         """
-
         :param k: 持仓数
         """
         self.k = k
     def __call__(self, env):
         # # 获取当前持仓
         positions = env.account.position
-        # 如果持仓股票不在行列中,则卖出
-        for position in positions:
-            if position not in self.selected_codes:
-                env.account.sell(position, 1.0)
-        # 难点:均仓
+        # # 获取候选股票
+        selected_codes = env.selected_codes
+        # 如果当前持仓未在候选列表则卖掉
+        codes_to_sell = []
+        for code, position in positions.items():
+            if code not in selected_codes:
+                codes_to_sell.append(code)
+                env.account.sell(code, position['amount'])
