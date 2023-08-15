@@ -2,7 +2,6 @@
 import argparse
 from typing import List
 import pandas as pd
-import tushare as ts
 import gym
 from loguru import logger
 from stable_baselines3 import PPO
